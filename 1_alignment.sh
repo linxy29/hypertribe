@@ -16,6 +16,7 @@
 #BSUB-o stderr
 
 # Step 1: STAR alignment
+# STAR (Spliced Transcripts Alignment to a Reference) is what is called a “splicing-aware” aligner, in that it is designed to align RNA-seq data, which needs to accomodate for (and not penalise too heavily) the natural “gaps” that occur when aligning RNA to genomic DNA sequence as a result of splicing.
 ls -d Sample*[0-9] | xargs -I {} sh -c "STAR --genomeLoad NoSharedMemory --genomeDir hg19_star/ --readFilesIn {}/*R1_001.fastq.gz {}/*R2_001.fastq.gz --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outFileNamePrefix {}/ --outStd Log --readFilesCommand zcat"
 
 # ls -d: It is used to display only subdirectories.
