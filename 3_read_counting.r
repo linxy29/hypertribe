@@ -58,10 +58,13 @@ pileup.res <- mclapply( bam.files, function( bf ){
         pileupParam=PileupParam( distinguish_strands=F, min_base_quality=10, max_depth=1e4 ) )
     return( res ) }, mc.cores = 1 )
 
-names( pileup.res ) <- basename( bam.files )
+class(pileup.res) # a list
+pileup.res[[1]] # first bam file
+
+names( pileup.res ) <- basename( bam.files ) # renames according to file name
 
 # Saving pileup object for easier future access
-saveRDS( pileup.res, file = "pileup_res.rds" )
+saveRDS( pileup.res, file = "pileup_res_DCD_only.rds" )
 
 # if( F ){
 pileup.res <- lapply( pileup.res, function( df ){
