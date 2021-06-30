@@ -3,8 +3,8 @@ Hypertribe run on Molm13 datasets
 
 Original code: https://github.com/DiuTTNguyen/MSI2_HyperTRIBE_codes
 
-### Workflow
-1. Align reads to reference genome
+## Workflow
+### 1. Align reads to reference genome
 + Tool: STAR (splice-aware aligner)
 + Output: BAM alignment files
 2. Prepare BAM files for variant calling
