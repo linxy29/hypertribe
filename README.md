@@ -16,3 +16,6 @@ Original code: https://github.com/DiuTTNguyen/MSI2_HyperTRIBE_codes
 + Output: VCF (variant caller format) files
 ### 4. Filter SNPs and read counting
 + A/G, T/C
+### 5. Statistical test for differential edit frequencies between control and fusion protein samples
++ Beta-binomial distribution
++ Maximum likelihood test
