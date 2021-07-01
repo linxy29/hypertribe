@@ -13,7 +13,7 @@ bam.files <- Sys.glob("*.bam") # Function to do wildcard expansion (also known a
 ## Step 1: Filter the SNPs we are interested in
 
 # Input: Given a VCF file from previous step, a list of exons (GRanges object with ranges of all exons within UCSC hg19), and hg19 genome
-# Output: This function returns a GRanges object, where each entry is a A/G SNP mutation that occurs within an exon.
+# Output: This function returns a GRanges object, where each entry is a A/G or T/C SNP mutation that occurs within an exon.
 filter.vcf <- function( vcf.file, exons, genome ){
     vcf <- readVcf( vcf.file, genome ) # Read in Variant Call Format (VCF) files. vcf is a dataframe
 # Filter all SNPs found in dbSNP
@@ -52,7 +52,7 @@ saveRDS( grl, file = "a2g_snp_filtered.rds" )
 a2g.snp <- sort( unique( unlist( grl, use.names = F ) ) ) 
 
 
-## Step 2: Group together all SNPs across the 9 datasets
+## Step 2: Counting filtered SNPs across the 9 datasets
 
 # Take bam.files, which is a list of all bam file names, and input into function(bf)
 # pileup.res output: "piling up" all the reads at each SNP (across all the bam files) we have obtained previously, into a count.
@@ -93,7 +93,7 @@ head(pileup.res) # each sample is appended with SNP id, ref allele, alt allele, 
 
 ### Step 3: Annotating SNPs
 
-# Most simplistic allele annotation - just the gene where the SNP is from (but then shouldn't it be novel?)
+# Most simplistic allele annotation - just the gene where the SNP is from 
 idx <- which( countOverlaps( a2g.snp, exbygene ) == 1 ) # find out which SNP has an overlap with gene annotation. TRUE if exists (overlaps), FALSE if not. The which() function in R returns the position or the index of the value which satisfies the given condition.
 a2g.snp.subset <- a2g.snp[idx] # only getting the SNPs that are annotated with gene
 ol  <- findOverlaps( a2g.snp.subset, exbygene ) # Finds range overlaps between a GAlignments, GAlignmentPairs, or GAlignmentsList object, and another range-based object. When the query and the subject are GRanges or GRangesList objects, findOverlaps uses the triplet (sequence name, range, strand) to determine which features (see paragraph below for the definition of feature) from the query overlap which features in the subject, where a strand value of "*" is treated as occurring on both the "+" and "-" strand. An overlap is recorded when a feature in the query and a feature in the subject have the same sequence name, have a compatible pairing of strands (e.g. "+"/"+", "-"/"-", "*"/"+", "*"/"-", etc.), and satisfy the interval overlap requirements. 
