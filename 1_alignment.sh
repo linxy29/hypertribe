@@ -1,90 +1,84 @@
+#!/bin/bash
+
 #######################
-#### ORIGINAL CODE ####
+#### CONFIGURATION ####
 #######################
 
-# Original code obtained from https://github.com/DiuTTNguyen/MSI2_HyperTRIBE_codes/tree/master/Pipeline%20code_Yuhueng (tribe_alignment_human.sh)
+# Number of threads
+THREADS=16
 
-# The bsub command is used to submit a batch script (see meaning of options here: https://www.ibm.com/docs/en/spectrum-lsf/10.1.0?topic=bsub-options)
+# Memory allocation (in GB)
+MEMORY=256
 
-#BSUB-J MOLM13_alignment               # name of the job
-#BSUB-W 3:00                   	# Time limit in minutes
-#BSUB-n 4
-#BSUB-R "span[ptile=4]"
-#BSUB-M 10
+# Paths to genome index and input/output directories
+GENOME_DIR="/home/linxy29/data/reference/STAR_ref_GRCh38_and_H1N1"
+OUTPUT_DIR="extract_RNAedit/"
 
-#BSUB-o stdout
-#BSUB-o stderr
+# Create output directory if it doesn't exist
+mkdir -p $OUTPUT_DIR
 
-# Step 1: STAR alignment
-# STAR (Spliced Transcripts Alignment to a Reference) is what is called a “splicing-aware” aligner, in that it is designed to align RNA-seq data, which needs to accomodate for (and not penalise too heavily) the natural “gaps” that occur when aligning RNA to genomic DNA sequence as a result of splicing.
-ls -d Sample*[0-9] | xargs -I {} sh -c "STAR --genomeLoad NoSharedMemory --genomeDir hg19_star/ --readFilesIn {}/*R1_001.fastq.gz {}/*R2_001.fastq.gz --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outFileNamePrefix {}/ --outStd Log --readFilesCommand zcat"
+# Function to check if a command succeeded
+check_success() {
+    if [ $? -ne 0 ]; then
+        echo "Error: $1 failed. Exiting."
+        exit 1
+    fi
+}
 
-# ls -d: It is used to display only subdirectories.
-# Bracketed characters ([ ]) – matches any occurrence of character enclosed in the square brackets.
-# The xargs command is used in a UNIX shell to convert input from standard input into arguments to a command
-# The -I option allows you to get the output into a placeholder, and then you can do various things.
-# sh is a command language interpreter that executes commands read from a command line string, the standard input, or a specified file. If the -c option is present, then commands are read from string. 
+# Function to check if a file exists
+file_exists() {
+    if [ -f $1 ]; then
+        echo "Skipping $2, file $1 already exists."
+        return 0
+    else
+        return 1
+    fi
+}
 
-# Meaning of commands :
-# --genomeLoad NoSharedMemory : no shared memory usage for genome files
-# --genomeDir hg19_star/ : specifies the path to the directory where genome indices are stored
-# --readFilesIn {}/*R1_001.fastq.gz {}/*R2_001.fastq.gz : names of the files containing sequences to be mapped (fastq files). If using PE reads, read1 and read2 files have to be supplied
-# --runThreadN 4 : defines number of threads to be used for genome generation. Has to be set to the number of available cores on server. 
-# --alignIntronMin 70 : minimum intron length (default 20)
-# --alignIntronMax 100000 : maximum intron length (default 1000000)
-# --outSAMtype BAM SortedByCoordinate : outputs an alignment file that is sorted by coordinates (similar to samtools sort)
-# --outFilterMultimapNmax 1 : maximum number of loci the read is allowed to map to. Alignments will be output only if the reads maps to no more loci than this value (default 10)
-# --outFilterMultimapScoreRange 0 : the score range below the maximum score for multimapping alignments (default 1)
-# --outFilterMismatchNmax 5 : alignment will be output only if it has no more mismatches than this value (default 10)
-# --outFileNamePrefix {}/ : output files name prefix
-# --outStd Log : determines which output will be directed to standard output
-# --readFilesCommand zcat : used to read in compressed (i.e. gz files)
+# Get a list of unique sample names by stripping _R1/_R2 from the fastq file names
+samples=($(ls *.fastq.gz | sed -E 's/(_R[12]_001\.fastq\.gz)$//' | sort | uniq))
 
-# Step 2: Rename files
-ls -d Sample*[0-9] | xargs -I {} sh -c "mv {}/*bam {}.bam"
+# Number of samples to process
+num_samples=${#samples[@]}
+echo "Number of samples to process: $num_samples"
 
-# Step 3: Index bam files
-# The -n option lets you tell xargs to perform one iteration at a time
-# samtools index : Index a coordinate-sorted BGZIP-compressed SAM, BAM or CRAM file for fast random access
-ls Sample*[0-9].bam | xargs -n 1 samtools index
+#######################
+#### ALIGNMENT LOOP ###
+#######################
 
-#################
-#### TEST RUN ###
-#################
+# Loop through each sample and process R1 and R2
+for sample in "${samples[@]}"
+do
+    star_outfile="${OUTPUT_DIR}/${sample}_Aligned.sortedByCoord.out.bam"
 
-## STAR manual: https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
+    # Check if this sample has already been processed
+    if file_exists $star_outfile "STAR alignment"; then
+        continue
+    fi
 
-# Download the data: fasta genome sequence and gtf annotation file
-## download hg19 genome: http://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/ (hg19.fa.gz)
-## download hg19 annotation: https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/genes/  (hg19.ensGene.gtf.gz)
-## unzip the .gz files using gunzip <file>
+    # Define paths for R1 and R2 fastq files
+    fastq_R1="${sample}_R1_001.fastq.gz"
+    fastq_R2="${sample}_R2_001.fastq.gz"
+    
+    # Check if both R1 and R2 exist
+    if [[ -f $fastq_R1 && -f $fastq_R2 ]]; then
+        echo "Processing sample: $sample"
+        echo "R1: $fastq_R1"
+        echo "R2: $fastq_R2"
 
-## 1. Indexing hg19 genome ~1hr
-STAR --runThreadN 4 --runMode genomeGenerate --genomeDir hg19-index/ --genomeFastaFiles hg19/hg19.fa --sjdbGTFfile hg19/hg19.ensGene.gtf --sjdbOverhang 49
+        # Run STAR alignment for the sample
+        STAR --genomeDir $GENOME_DIR \
+             --readFilesIn $fastq_R1 $fastq_R2 \
+             --runThreadN $THREADS \
+             --outSAMtype BAM SortedByCoordinate \
+             --outFilterMultimapNmax 1 \
+             --outFileNamePrefix ${OUTPUT_DIR}/${sample}_ \
+             --readFilesCommand zcat
+        
+        # Check for success of the STAR command
+        check_success "STAR alignment for $sample"
 
-# --runMode genomeGenerate : directs STAR to run genome indices generation job
-# --sjdbGTFfile hg19/hg19.ensGene.gtf : (splice junction database) path to GTF file with annotations
-# --sjdbOverhang 49 : length of donor/acceptor sequence on each side of the junctions. Ideally: (mate length - 1). For instance, for Illumina 2x100b paired-end reads, the ideal value is 100-1=99. In case of reads of varying length, the ideal value is max(ReadLength)-1
-
-## 2. Aligning
-
-# output files will be named like this: Molm13_MIG_R1_Aligned.sortedByCoord.out.bam 
-# BAM format explained: https://support.illumina.com/help/BS_App_RNASeq_Alignment_OLH_1000000006112/Content/Source/Informatics/BAM-Format.htm
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_MIG_R1_1.fastq fastq-files/Molm13_MIG_R1_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_MIG_R1_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_MIG_R2_1.fastq fastq-files/Molm13_MIG_R2_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_MIG_R2_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_MIG_R3_1.fastq fastq-files/Molm13_MIG_R3_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_MIG_R3_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_DCD_R1_1.fastq fastq-files/Molm13_Hyper_dADAR_DCD_R1_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_DCD_R1_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_DCD_R2_1.fastq fastq-files/Molm13_Hyper_dADAR_DCD_R2_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_DCD_R2_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_DCD_R3_1.fastq fastq-files/Molm13_Hyper_dADAR_DCD_R3_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_DCD_R3_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_R1_1.fastq fastq-files/Molm13_Hyper_dADAR_R1_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_R1_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_R2_1.fastq fastq-files/Molm13_Hyper_dADAR_R2_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_R2_
-
-STAR --genomeLoad NoSharedMemory --genomeDir hg19-index/ --readFilesIn fastq-files/Molm13_Hyper_dADAR_R3_1.fastq fastq-files/Molm13_Hyper_dADAR_R3_2.fastq --runThreadN 4 --alignIntronMin 70 --alignIntronMax 100000 --outSAMtype BAM SortedByCoordinate --outFilterMultimapNmax 1 --outFilterMultimapScoreRange 0 --outFilterMismatchNmax 5 --outStd Log --outFileNamePrefix mapped-reads-OUT/Molm13_Hyper_dADAR_R3_
+    else
+        echo "Missing R1 or R2 file for sample: $sample"
+    fi
+done

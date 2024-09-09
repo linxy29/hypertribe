@@ -1,5 +1,5 @@
 library(VariantAnnotation)
-library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
 library(org.Hs.eg.db)
 library(BiocParallel)
 library(parallel)
@@ -8,11 +8,12 @@ library(Rsamtools)
 library(reshape2)
 library(openxlsx)
 
-bam.files <- Sys.glob("*.bam") # Function to do wildcard expansion (also known as globbing) on file paths. Returns a character vector of matched file paths
+bam.files <- Sys.glob("*dedupped.bam") # Function to do wildcard expansion (also known as globbing) on file paths. Returns a character vector of matched file paths
+print(bam.files)
 
 ## Step 1: Filter the SNPs we are interested in
 
-# Input: Given a VCF file from previous step, a list of exons (GRanges object with ranges of all exons within UCSC hg19), and hg19 genome
+# Input: Given a VCF file from previous step, a list of exons (GRanges object with ranges of all exons within UCSC hg38), and hg38 genome
 # Output: This function returns a GRanges object, where each entry is a A/G or T/C SNP mutation that occurs within an exon.
 filter.vcf <- function( vcf.file, exons, genome ){
     vcf <- readVcf( vcf.file, genome ) # Read in Variant Call Format (VCF) files. vcf is a dataframe
@@ -33,8 +34,8 @@ filter.vcf <- function( vcf.file, exons, genome ){
 
 vcf.files <- Sys.glob( "*FinalR.vcf" )
 # Load all the exons from UCSC gene models
-exbygene <- exonsBy( TxDb.Hsapiens.UCSC.hg19.knownGene, "gene" ) # Returns a large compressed GRanges list of all genes within hg19. Grouped by genes.
-l <- mclapply( vcf.files, filter.vcf, exbygene, "hg19", mc.cores = 1 ) #exbygene and hg19 are arguments into filter.vcf function
+exbygene <- exonsBy( TxDb.Hsapiens.UCSC.hg38.knownGene, "gene" ) # Returns a large compressed GRanges list of all genes within hg38. Grouped by genes.
+l <- mclapply( vcf.files, filter.vcf, exbygene, "hg38", mc.cores = 1 ) #exbygene and hg38 are arguments into filter.vcf function
 # mclapply is a parallelized version of lapply, it returns a list of the same length as X, each element of which is the result of applying FUN to the corresponding element of X. It relies on forking and hence is not available on Windows unless mc.cores = 1. 
 # quite long ~30min
 
@@ -54,7 +55,7 @@ a2g.snp <- sort( unique( unlist( grl, use.names = F ) ) )
 
 ## Step 2: Counting filtered SNPs across the 9 datasets
 
-# Take bam.files, which is a list of all bam file names, and input into function(bf)
+# Take bam.files, which is a list of all bam file names, and input into function(bf). The bam files used here are dedupped.bam.
 # pileup.res output: "piling up" all the reads at each SNP (across all the bam files) we have obtained previously, into a count.
 pileup.res <- mclapply( bam.files, function( bf ){
     bf <- BamFile( bf ) # Use BamFile() to create a reference to a BAM file (and optionally its index). The reference remains open across calls to methods, avoiding costly index re-loading.
@@ -67,12 +68,12 @@ pileup.res <- mclapply( bam.files, function( bf ){
 saveRDS( pileup.res, file = "pileup.res_bf.rds" )
 
 class(pileup.res) # a list
-pileup.res[[9]] # ninth bam file
+#pileup.res[[9]] # ninth bam file
 
 names( pileup.res ) <- basename( bam.files ) # renames according to file name
 
 # Saving pileup object for easier future access
-saveRDS( pileup.res, file = "pileup_res_DCD_only.rds" )
+#saveRDS( pileup.res, file = "pileup_res_DCD_only.rds" )
 saveRDS( pileup.res, file = "pileup_res.rds" ) # use this one
 
 # if( F ){
@@ -105,8 +106,8 @@ gene.symbol <- unlist( gene.symbol ) # becomes a character
 anno <- DataFrame( entrez.id, gene.symbol ) # create a dataframe with column1 = entrez.id and column2 = gene.symbol
 
 anno$annotation <- "cds" # add a column called "annotation" and fill the whole column with "cds"
-utr3bytx <- threeUTRsByTranscript(TxDb.Hsapiens.UCSC.hg19.knownGene) #  Get the 3' UTRs grouped by transcript
-utr5bytx <- fiveUTRsByTranscript(TxDb.Hsapiens.UCSC.hg19.knownGene) #  Get the 5' UTRs grouped by transcript
+utr3bytx <- threeUTRsByTranscript(TxDb.Hsapiens.UCSC.hg38.knownGene) #  Get the 3' UTRs grouped by transcript
+utr5bytx <- fiveUTRsByTranscript(TxDb.Hsapiens.UCSC.hg38.knownGene) #  Get the 5' UTRs grouped by transcript
 anno$annotation[countOverlaps( a2g.snp.subset, utr5bytx ) > 0] <- 'utr5' # if the snp overlaps with UTR region, change the annotation column to UTR instead of CDS
 anno$annotation[countOverlaps( a2g.snp.subset, utr3bytx ) > 0] <- 'utr3'
 
