@@ -8,6 +8,10 @@ library(Rsamtools)
 library(reshape2)
 library(openxlsx)
 
+## Pre-setp: Set working directory if running in R studio
+#setwd("/home/linxy29/data/TRIBE/HGC20240511005-0002/extract_RNAedit")
+
+
 bam.files <- Sys.glob("*dedupped.bam") # Function to do wildcard expansion (also known as globbing) on file paths. Returns a character vector of matched file paths
 print(bam.files)
 
@@ -32,7 +36,7 @@ filter.vcf <- function( vcf.file, exons, genome ){
     return(a2g.snp)
 }
 
-vcf.files <- Sys.glob( "*FinalR.vcf" )
+vcf.files <- Sys.glob( "*filtered.vcf" )
 # Load all the exons from UCSC gene models
 exbygene <- exonsBy( TxDb.Hsapiens.UCSC.hg38.knownGene, "gene" ) # Returns a large compressed GRanges list of all genes within hg38. Grouped by genes.
 l <- mclapply( vcf.files, filter.vcf, exbygene, "hg38", mc.cores = 1 ) #exbygene and hg38 are arguments into filter.vcf function
@@ -132,8 +136,8 @@ pileup.res.test <- lapply( pileup.res, function( df, a2g.snp ){#l in lapply() st
     df$width <- NULL
     return( df )
 }, a2g.snp.subset )
-head(pileup.res$Molm13_MIG_R3_Aligned.sortedByCoord.out.rg_added.dedupped.split.bam)
-head(pileup.res.test$Molm13_MIG_R3_Aligned.sortedByCoord.out.rg_added.dedupped.split.bam) # matched based on snp.id. each SNP is annotated with seqname, start, strand, entrez.id, gene.symbol, annotation (cds, utr)
+head(pileup.res$A1_dedupped.bam)
+head(pileup.res.test$A1_dedupped.bam) # matched based on snp.id. each SNP is annotated with seqname, start, strand, entrez.id, gene.symbol, annotation (cds, utr)
 
 anno.df <- pileup.res.test[[1]][(1:(ncol(pileup.res.test[[1]])-2))]
 pileup.res.test2 <- lapply( pileup.res.test, function( df ) df[-(1:(ncol(pileup.res.test[[1]])-2))] )
