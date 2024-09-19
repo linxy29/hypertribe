@@ -53,19 +53,21 @@
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 BiocManager::install("bbmle")
-library(bbmle)
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 BiocManager::install("statmod")
+library(bbmle)
 library(statmod)
 library(openxlsx)
 library(parallel)
 library(stringr)
 library(VGAM)
 library(DEXSeq)
+library(tidyverse)
 
 # Read in excel file of snp counts
-df_snp_counts <- read.xlsx( "Molm13_snp_counts_dedupped.xlsx", sheet = 1 )
+setwd("/home/linxy29/data/TRIBE/HGC20240511005-0002/extract_RNAedit")
+df_snp_counts <- read.xlsx( "snp_counts_dedupped.xlsx", sheet = 1 )
 
 ##################################
 # Generating our model for null hypothesis
@@ -73,6 +75,7 @@ df_snp_counts <- read.xlsx( "Molm13_snp_counts_dedupped.xlsx", sheet = 1 )
 # H0: "All samples have equal RNA editing level. That is, the edit frequencies of all edit sites are drawn from the same beta distribution"
 ##################################
 # This function returns the Maximum likelihood estimation of beta binomial distribution parameters prob (mu) and rho. We already know n.
+
 mle.custom.h0 <- function( ref, alt, debug = F ){
   x <- alt # number reads supporting alternative allele (A to G or T to C)
   size <- ref + alt # total number of reads mapping at that position
@@ -168,20 +171,61 @@ mle.custom.h1 <- function( ref1, alt1, ref2, alt2, debug = F ){
 ref.counts <- df_snp_counts[,grep('ref.count', colnames(df_snp_counts))] # grab all the columns with ".ref.count" and their values
 alt.counts <- df_snp_counts[,grep('alt.count', colnames(df_snp_counts))] # grab all the columns with ".alt.count" and their values
 
+# Extract paired control and FP sample !!!!!!!!!!Adjust this part base on the experimental design
+cur_df_snp_counts <- df_snp_counts %>%
+  select(-A3_dedupped.bam.ref.count, -A3_dedupped.bam.alt.count, -AO7_dedupped.bam.ref.count, -AO7_dedupped.bam.alt.count) %>%
+  filter(rowSums(select(., contains('count'))) != 0)
+
 # About 15min
-lrt.res <- mclapply( 1:nrow(df_snp_counts), function( i ){ 
-  counts <- as.integer( df_snp_counts[i,-(1:8)] ) # grab each row for the last 9 columns, '-' sign indicates dropping columns. counts is the whole row of ref and alt allele counts across all 9 samples
-  ref <- counts[ seq( 1, length( counts ), 2 ) ] # output of seq(1,length(counts.test),2): 1  3  5  7  9 11 13 15 17
-  alt <- counts[ seq( 2, length( counts ), 2 ) ] # output of seq(2,length(counts.test),2): 2  4  6  8  10 12 14 16 18
-  fit0 <- mle.custom.h0( ref, alt ) # returns you the parameter value that maximises the log likelihood
-  fit1 <- mle.custom.h1( ref[1:2], alt[1:2], ref[-(1:2)], alt[-(1:2)] )
-  p.value <- pchisq( 2 *( fit0@min - fit1@min ), 1, lower.tail=F ) # pchisq(q, df, ncp = 0, lower.tail = TRUE, log.p = FALSE). pchisq gives the distribution function. fit0@min is the log likelihood of fit0, fit1@min is the log likelihood of fit1. Degrees of freedom (df): degrees of freedom equal to the difference in the number of free parameters between the complex model and the nested model. lower.tail = F means P[X > x]. If lower.tail = T, then P[X<=x]. 
-  # A common significance level to use is 0.05. Under that significance level, we would reject the null hypothesis and conclude that we should use the more complex model.
-  value <- fit1@min
-  code <- fit1@details$convergence # A value of 0 indicates normal convergence. If you see a 1 reported, this means that the iteration limit was exceeded. This limit is set to 10000 by default.
-  return( c( p.value = p.value, value = value, code = code ) )
-}, mc.cores = 1 )
-lrt.res <- data.frame( do.call( 'rbind', lrt.res ) )
+# LRT testing function with added checks and print statements for debugging
+lrt.res <- mclapply(1:nrow(cur_df_snp_counts), function(i) {
+  counts <- as.integer(cur_df_snp_counts[i, -(1:8)])  # grab each row for the last 9 columns
+  ref <- counts[seq(1, length(counts), 2)]  # extract ref counts
+  alt <- counts[seq(2, length(counts), 2)]  # extract alt counts
+  
+  # Add print statements to track the progress and data
+  print(paste("Processing row:", i))
+  print(paste("ref:", paste(ref, collapse = ",")))
+  print(paste("alt:", paste(alt, collapse = ",")))
+  
+  # Fit the null model (H0: Same beta-binomial distribution for all samples)
+  fit0 <- tryCatch({
+    mle.custom.h0(ref, alt)
+  }, error = function(e) {
+    print(paste("Error in mle.custom.h0 for row:", i, "->", e))
+    return(NULL)
+  })
+  
+  # Fit the alternative model (H1: Different distributions between control and FP)
+  fit1 <- tryCatch({
+    mle.custom.h1(ref[1:2], alt[1:2], ref[-(1:2)], alt[-(1:2)])
+  }, error = function(e) {
+    print(paste("Error in mle.custom.h1 for row:", i, "->", e))
+    return(NULL)
+  })
+  
+  # If either fit fails or is NULL, return NA for this row
+  if (is.null(fit0) || is.null(fit1)) {
+    return(c(p.value = NA, value = NA, code = NA))
+  }
+  
+  # Perform likelihood ratio test only if both models are valid
+  print(paste0("fit0@min: ", fit0@min ,"fit1@min: ", fit1@min))
+  if (!is.na(fit0@min) && !is.na(fit1@min)) {
+    p.value <- pchisq(2 * (fit0@min - fit1@min), 1, lower.tail = FALSE)
+    value <- fit1@min
+    code <- fit1@details$convergence  # Check if optimization converged
+    return(c(p.value = p.value, value = value, code = code))
+  } else {
+    return(c(p.value = NA, value = NA, code = NA))
+  }
+  
+}, mc.cores = 1)
+
+# Convert results to a data frame
+lrt.res <- data.frame(do.call('rbind', lrt.res))
+
+
 
 # Additional columns
 alt.freq <- alt.counts / ( ref.counts + alt.counts ) # for all rows, obtaining edit frequency --> alt/(alt+ref)
@@ -200,14 +244,14 @@ rowmask <- rowSums( alt.counts != 0 ) > 1 & # for those alt counts > 0, sum up t
   ( rowMeans( ref.counts[4:5] ) + rowMeans( alt.counts[4:5] ) >= 5 ) &
   ( rowMeans( ref.counts ) + rowMeans( alt.counts ) >= 5 ) &
   lrt.res$value > 0 & 
-  !is.na(df_snp_counts$gene.symbol) # has a gene symbol
+  !is.na(cur_df_snp_counts$gene.symbol) # has a gene symbol
 
 # Anyway let's just continue first
 df.stats.test <- df.stats[ rowmask, ]
 df.stats.test$p.adj <- p.adjust( df.stats.test$p.value, 'BH' ) # Adjust p value to control for false discovery rate (FDR) using a Benjamin–Hochberg correction (FDR = FP / (FP + TP)), FDR wants to reduce false positives
 df.stats.test$value <- NULL # replace all the values with NULL
 df.stats.test$code <- NULL # replace all the codes with NULL
-df1 <- cbind( df_snp_counts[ rowmask, 1:8 ], df.stats.test, df_snp_counts[ rowmask, -(1:8) ] ) # generating huge dataframe with all the info so far
+df1 <- cbind( cur_df_snp_counts[ rowmask, 1:8 ], df.stats.test, cur_df_snp_counts[ rowmask, -(1:8) ] ) # generating huge dataframe with all the info so far
 
 # Filtering for snps with diff.frequency> 0 and adjusted pvalue < 0.05
 df1 <- df1[ which( df1$diff.frequency > 0 & df1$p.adj < .05 ), ]
